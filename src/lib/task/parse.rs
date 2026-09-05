@@ -1,6 +1,6 @@
 use pulldown_cmark::{Event, Parser};
 
-use crate::task::{Output, Result, Task};
+use crate::task::{Error, Output, Result, Task};
 use std::sync::Arc;
 
 /// A [`Task`] which parses the contents of the given [`Task`]'s output as
@@ -18,9 +18,16 @@ impl Task for Parse {
         vec![self.0.clone()]
     }
     fn run(&self, dependencies: &[Output]) -> Result<Output> {
-        let source = dependencies[0]
+        let [source] = dependencies else {
+            return Err(Error::DependencyCount {
+                expected: 1,
+                actual: dependencies.len(),
+            });
+        };
+
+        let source = source
             .downcast_ref::<Vec<u8>>()
-            .expect("Parse dependency returned the wrong output type");
+            .ok_or(Error::DependencyType { index: 0 })?;
 
         let source = std::str::from_utf8(source)?;
 
@@ -53,6 +60,41 @@ mod tests {
     fn run_parse(source: impl Into<Vec<u8>>) -> Result<Output> {
         let dependency: Output = Arc::new(source.into());
         Parse::new(source_task()).run(std::slice::from_ref(&dependency))
+    }
+
+    #[test]
+    fn missing_dependency_returns_error() {
+        assert!(matches!(
+            Parse::new(source_task()).run(&[]),
+            Err(Error::DependencyCount {
+                expected: 1,
+                actual: 0,
+            }),
+        ));
+    }
+
+    #[test]
+    fn extra_dependency_returns_error() {
+        let dependency: Output = Arc::new(Vec::<u8>::new());
+        let dependencies = [dependency.clone(), dependency];
+
+        assert!(matches!(
+            Parse::new(source_task()).run(&dependencies),
+            Err(Error::DependencyCount {
+                expected: 1,
+                actual: 2,
+            }),
+        ));
+    }
+
+    #[test]
+    fn wrong_dependency_type_returns_error() {
+        let dependency: Output = Arc::new(String::new());
+
+        assert!(matches!(
+            Parse::new(source_task()).run(std::slice::from_ref(&dependency)),
+            Err(Error::DependencyType { index: 0 }),
+        ));
     }
 
     #[test]

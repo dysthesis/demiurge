@@ -10,6 +10,10 @@ pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("expected {expected} dependency outputs, got {actual}")]
+    DependencyCount { expected: usize, actual: usize },
+    #[error("dependency output at index {index} has an unexpected type")]
+    DependencyType { index: usize },
     #[error("failed to read {path}: {source}")]
     Read {
         path: PathBuf,
