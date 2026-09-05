@@ -7,7 +7,9 @@ use crate::task::{Output, Task};
 pub struct Fetch(PathBuf);
 impl Fetch {
     #[inline]
-    pub fn new(path: PathBuf) -> Self { Self(path) }
+    pub fn new(path: PathBuf) -> Self {
+        Self(path)
+    }
 }
 
 impl Task for Fetch {

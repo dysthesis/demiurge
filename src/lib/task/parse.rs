@@ -1,3 +1,5 @@
+use pulldown_cmark::{Event, Parser};
+
 use crate::task::{Output, Task};
 use std::sync::Arc;
 
@@ -13,11 +15,19 @@ impl Parse {
 
 impl Task for Parse {
     fn dependencies(&self) -> Vec<Arc<dyn Task>> {
-        vec![]
+        vec![self.0.clone()]
     }
-
     fn run(&self, dependencies: &[Output]) -> Output {
-        todo!("Markdown parser")
+        let source = dependencies[0]
+            .downcast_ref::<std::io::Result<Vec<u8>>>()
+            .expect("Parse dependency returned the wrong output type");
+
+        let source = source.as_ref().expect("failed to fetch source");
+        let source = std::str::from_utf8(source).expect("Markdown must be UTF-8");
+
+        let events: Vec<Event<'static>> = Parser::new(source).map(Event::into_static).collect();
+
+        Arc::new(events)
     }
 }
 
