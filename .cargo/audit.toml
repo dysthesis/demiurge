@@ -1,0 +1,4 @@
+# Network access is unavailable in the Nix sandbox.
+[yanked]
+enabled = false
+update_index = false
