@@ -31,3 +31,6 @@ codegen-units = 1
 panic = "abort"
 incremental = false
 strip = "symbols"
+
+[dependencies]
+pulldown-cmark = { version = "0.13.4", default-features = false }

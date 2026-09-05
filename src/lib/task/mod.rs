@@ -1,9 +1,9 @@
-mod fetch;
-mod parse;
+pub mod fetch;
+pub mod parse;
 use std::{any::Any, sync::Arc};
 
 // NOTE: This is a placeholder output type until we get Store implemented.
-pub(crate) type Output = Arc<dyn Any + Send + Sync>;
+pub type Output = Arc<dyn Any + Send + Sync>;
 
 /// A unit of work in our build system.
 pub trait Task: Send + Sync {
