@@ -5,7 +5,7 @@
     craneLib,
     ...
   }: {
-    checks.demiurge-clippy = craneLib.cargoClippy (
+    checks.clippy = craneLib.cargoClippy (
       commonArgs
       // {
         inherit cargoArtifacts;

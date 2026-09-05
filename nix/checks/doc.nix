@@ -5,7 +5,7 @@
     craneLib,
     ...
   }: {
-    checks.demiurge-doc = craneLib.cargoDoc (
+    checks.doc = craneLib.cargoDoc (
       commonArgs
       // {
         inherit cargoArtifacts;

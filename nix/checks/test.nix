@@ -5,7 +5,7 @@
     craneLib,
     ...
   }: {
-    checks.demiurge-nextest = craneLib.cargoNextest (
+    checks.nextest = craneLib.cargoNextest (
       commonArgs
       // {
         inherit cargoArtifacts;

@@ -4,9 +4,9 @@
     src,
     ...
   }: {
-    checks.demiurge-audit = craneLib.cargoAudit {
+    checks.audit = craneLib.cargoAudit {
       inherit src;
-      advisory-db = inputs.advisory-db;
+      inherit (inputs) advisory-db;
     };
   };
 }

@@ -5,7 +5,7 @@
     src,
     ...
   }: {
-    checks.demiurge-toml-fmt = craneLib.taploFmt {
+    checks.toml-fmt = craneLib.taploFmt {
       src = pkgs.lib.sources.sourceFilesBySuffices src [".toml"];
     };
   };

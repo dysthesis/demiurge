@@ -4,6 +4,6 @@
     src,
     ...
   }: {
-    checks.demiurge-fmt = craneLib.cargoFmt {inherit src;};
+    checks.fmt = craneLib.cargoFmt {inherit src;};
   };
 }

@@ -2,10 +2,11 @@
 name = "demiurge"
 version = "0.0.1"
 edition = "2024"
+license = "MIT"
 
 [lib]
 name = "demiurge"
-path = "src/lib.rs"
+path = "src/lib/mod.rs"
 
 [[bin]]
 name = "demiurge"

@@ -11,7 +11,7 @@
         checks = config.checks;
         packages =
           (with pkgs; [
-            nix
+            cargo-mutants
             statix
             deadnix
             alejandra
