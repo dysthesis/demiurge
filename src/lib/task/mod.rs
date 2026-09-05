@@ -1,14 +1,16 @@
+mod fetch;
+mod parse;
 use std::{any::Any, sync::Arc};
 
 // NOTE: This is a placeholder output type until we get Store implemented.
-type Output = Arc<dyn Any + Send + Sync>;
+pub(crate) type Output = Arc<dyn Any + Send + Sync>;
 
 /// A unit of work in our build system.
 pub trait Task: Send + Sync {
     /// List of other tasks whose output it needs to build.
     fn dependencies(&self) -> Vec<Arc<dyn Task>>;
     /// Take in the dependencies' output and builds its own output. This assumes
-    /// that `dependencies` are up-to-date. 
+    /// that `dependencies` are up-to-date.
     fn run(&self, dependencies: &[Output]) -> Output;
 }
 

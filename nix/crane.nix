@@ -7,6 +7,7 @@
           extensions = [
             "rust-analyzer"
             "rust-src"
+            "rustfmt"
             "llvm-tools-preview"
             "clippy"
           ];

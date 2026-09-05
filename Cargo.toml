@@ -12,7 +12,10 @@ path = "src/lib/mod.rs"
 name = "demiurge"
 path = "src/main.rs"
 
-[dependencies]
+[dev-dependencies]
+proptest = "1.11.0"
+proptest-derive = "0.8.0"
+tempfile = "3.27.0"
 
 [profile.dev]
 opt-level = 0
