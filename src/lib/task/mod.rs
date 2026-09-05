@@ -1,9 +1,24 @@
 pub mod fetch;
 pub mod parse;
-use std::{any::Any, sync::Arc};
+use std::{any::Any, io, path::PathBuf, result, str::Utf8Error, sync::Arc};
+
+use thiserror::Error;
 
 // NOTE: This is a placeholder output type until we get Store implemented.
 pub type Output = Arc<dyn Any + Send + Sync>;
+pub type Result<T> = result::Result<T, Error>;
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("failed to read {path}: {source}")]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("Markdown source is not valid UTF-8: {0}")]
+    InvalidUtf8(#[from] Utf8Error),
+}
 
 /// A unit of work in our build system.
 pub trait Task: Send + Sync {
@@ -11,7 +26,7 @@ pub trait Task: Send + Sync {
     fn dependencies(&self) -> Vec<Arc<dyn Task>>;
     /// Take in the dependencies' output and builds its own output. This assumes
     /// that `dependencies` are up-to-date.
-    fn run(&self, dependencies: &[Output]) -> Output;
+    fn run(&self, dependencies: &[Output]) -> Result<Output>;
 }
 
 #[cfg(test)]
@@ -26,8 +41,8 @@ mod tests {
             vec![]
         }
 
-        fn run(&self, _dependencies: &[Output]) -> Output {
-            Arc::new(self.0)
+        fn run(&self, _dependencies: &[Output]) -> Result<Output> {
+            Ok(Arc::new(self.0))
         }
     }
 
@@ -42,13 +57,14 @@ mod tests {
     fn task_references_are_send_and_sync() {
         assert_send_sync::<Arc<dyn Task>>();
         assert_send_sync::<Output>();
+        assert_send_sync::<Error>();
     }
 
     #[test]
     fn task_can_produce_an_erased_output() {
         let task: Arc<dyn Task> = Arc::new(Constant(42));
 
-        let output = task.run(&[]);
+        let output = task.run(&[]).unwrap();
 
         assert_eq!(output.downcast_ref::<i32>(), Some(&42));
     }

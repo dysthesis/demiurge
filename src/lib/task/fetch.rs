@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf, sync::Arc};
 
-use crate::task::{Output, Task};
+use crate::task::{Error, Output, Result, Task};
 
 /// A [`Task`] which fetches the content of the given path. It is a leaf Task,
 /// which means that it does not depend on anything else.
@@ -17,23 +17,26 @@ impl Task for Fetch {
         vec![]
     }
 
-    fn run(&self, _dependencies: &[Output]) -> Output {
-        Arc::new(fs::read(&self.0))
+    fn run(&self, _dependencies: &[Output]) -> Result<Output> {
+        let contents = fs::read(&self.0).map_err(|source| Error::Read {
+            path: self.0.clone(),
+            source,
+        })?;
+
+        Ok(Arc::new(contents))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io;
-
     use proptest::prelude::*;
     use tempfile::tempdir;
 
     use super::*;
 
-    fn output(output: &Output) -> &io::Result<Vec<u8>> {
+    fn output(output: &Output) -> &Vec<u8> {
         output
-            .downcast_ref::<io::Result<Vec<u8>>>()
+            .downcast_ref::<Vec<u8>>()
             .expect("Fetch returned the wrong output type")
     }
 
@@ -49,12 +52,21 @@ mod tests {
         let directory = tempdir().unwrap();
         let path = directory.path().join("missing");
 
-        let result = Fetch(path).run(&[]);
+        let error = match Fetch(path.clone()).run(&[]) {
+            Err(error) => error,
+            Ok(_) => panic!("missing file should fail"),
+        };
 
-        assert_eq!(
-            output(&result).as_ref().unwrap_err().kind(),
-            io::ErrorKind::NotFound,
-        );
+        match error {
+            Error::Read {
+                path: error_path,
+                source,
+            } => {
+                assert_eq!(error_path, path);
+                assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
+            }
+            error => panic!("unexpected error: {error}"),
+        }
     }
 
     #[test]
@@ -64,15 +76,15 @@ mod tests {
 
         fs::write(&path, b"before").unwrap();
 
-        let first = Fetch(path.clone()).run(&[]);
+        let first = Fetch(path.clone()).run(&[]).unwrap();
 
-        assert_eq!(output(&first).as_ref().unwrap(), b"before",);
+        assert_eq!(output(&first), b"before");
 
         fs::write(&path, b"after").unwrap();
 
-        let second = Fetch(path).run(&[]);
+        let second = Fetch(path).run(&[]).unwrap();
 
-        assert_eq!(output(&second).as_ref().unwrap(), b"after",);
+        assert_eq!(output(&second), b"after");
     }
 
     proptest! {
@@ -85,10 +97,10 @@ mod tests {
 
             fs::write(&path, &contents).unwrap();
 
-            let result = Fetch(path).run(&[]);
+            let result = Fetch(path).run(&[]).unwrap();
 
             prop_assert_eq!(
-                output(&result).as_ref().unwrap(),
+                output(&result),
                 &contents,
             );
         }

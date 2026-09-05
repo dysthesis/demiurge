@@ -1,6 +1,6 @@
 use pulldown_cmark::{Event, Parser};
 
-use crate::task::{Output, Task};
+use crate::task::{Output, Result, Task};
 use std::sync::Arc;
 
 /// A [`Task`] which parses the contents of the given [`Task`]'s output as
@@ -17,17 +17,16 @@ impl Task for Parse {
     fn dependencies(&self) -> Vec<Arc<dyn Task>> {
         vec![self.0.clone()]
     }
-    fn run(&self, dependencies: &[Output]) -> Output {
+    fn run(&self, dependencies: &[Output]) -> Result<Output> {
         let source = dependencies[0]
-            .downcast_ref::<std::io::Result<Vec<u8>>>()
+            .downcast_ref::<Vec<u8>>()
             .expect("Parse dependency returned the wrong output type");
 
-        let source = source.as_ref().expect("failed to fetch source");
-        let source = std::str::from_utf8(source).expect("Markdown must be UTF-8");
+        let source = std::str::from_utf8(source)?;
 
         let events: Vec<Event<'static>> = Parser::new(source).map(Event::into_static).collect();
 
-        Arc::new(events)
+        Ok(Arc::new(events))
     }
 }
 
@@ -36,21 +35,6 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    struct Source(Vec<u8>);
-
-    impl Task for Source {
-        fn dependencies(&self) -> Vec<Arc<dyn Task>> {
-            vec![]
-        }
-
-        fn run(&self, _dependencies: &[Output]) -> Output {
-            Arc::new(self.0.clone())
-        }
-    }
-
-    fn source(contents: impl Into<Vec<u8>>) -> Arc<dyn Task> {
-        Arc::new(Source(contents.into()))
-    }
     struct DummySource;
 
     impl Task for DummySource {
@@ -58,7 +42,7 @@ mod tests {
             vec![]
         }
 
-        fn run(&self, _dependencies: &[Output]) -> Output {
+        fn run(&self, _dependencies: &[Output]) -> Result<Output> {
             unreachable!("DummySource should not be evaluated in Parse unit tests")
         }
     }
@@ -66,10 +50,19 @@ mod tests {
     fn source_task() -> Arc<dyn Task> {
         Arc::new(DummySource)
     }
-    fn run_parse(source: impl Into<Vec<u8>>) -> Output {
+    fn run_parse(source: impl Into<Vec<u8>>) -> Result<Output> {
         let dependency: Output = Arc::new(source.into());
         Parse::new(source_task()).run(std::slice::from_ref(&dependency))
     }
+
+    #[test]
+    fn invalid_utf8_returns_error() {
+        assert!(matches!(
+            run_parse([0xff]),
+            Err(crate::task::Error::InvalidUtf8(_)),
+        ));
+    }
+
     proptest! {
         #[test]
         fn arbitrary_input_does_not_panic(
