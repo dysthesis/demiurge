@@ -1,6 +1,21 @@
 {inputs, ...}: {
   perSystem = {pkgs, ...}: let
-    craneLib = inputs.crane.mkLib pkgs;
+    toolchainFor = rustPkgs: let
+      rust-bin = inputs.rust-overlay.lib.mkRustBin {} rustPkgs;
+      selectProfile = toolchains:
+        toolchains.minimal.override {
+          extensions = [
+            "rust-analyzer"
+            "rust-src"
+            "llvm-tools-preview"
+            "clippy"
+          ];
+          targets = [];
+        };
+    in
+      rust-bin.selectLatestNightlyWith selectProfile;
+
+    craneLib = (inputs.crane.mkLib pkgs).overrideToolchain toolchainFor;
     src = craneLib.cleanCargoSource ../.;
     commonArgs = {
       inherit src;
