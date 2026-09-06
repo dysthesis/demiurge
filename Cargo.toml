@@ -12,7 +12,10 @@ path = "src/lib/mod.rs"
 name = "demiurge"
 path = "src/main.rs"
 
-[dependencies]
+[dev-dependencies]
+proptest = "1.11.0"
+proptest-derive = "0.8.0"
+tempfile = "3.27.0"
 
 [profile.dev]
 opt-level = 0
@@ -28,3 +31,7 @@ codegen-units = 1
 panic = "abort"
 incremental = false
 strip = "symbols"
+
+[dependencies]
+pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
+thiserror = "2.0.20"

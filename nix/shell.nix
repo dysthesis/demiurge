@@ -15,6 +15,7 @@
             statix
             deadnix
             alejandra
+            jq
           ])
           ++ moldDevelopment.packages;
       }
