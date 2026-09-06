@@ -1,7 +1,6 @@
 use std::{fs, sync::Arc};
 
-use demiurge::task::{self, fetch::Fetch, parse::Parse, Output, Task};
-use pulldown_cmark::{Event, HeadingLevel, Tag, TagEnd};
+use demiurge::task::{self, fetch::Fetch, parse::Parse, render::Render, Output, Task};
 use tempfile::tempdir;
 
 fn evaluate(task: &Arc<dyn Task>) -> task::Result<Output> {
@@ -15,31 +14,21 @@ fn evaluate(task: &Arc<dyn Task>) -> task::Result<Output> {
 }
 
 #[test]
-fn fetch_and_parse() {
+fn fetch_parse_and_render() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("page.md");
 
     fs::write(&path, "# Hello").unwrap();
 
-    let task: Arc<dyn Task> = Arc::new(Parse::new(Arc::new(Fetch::new(path))));
+    let fetch = Arc::new(Fetch::new(path));
+    let parse = Arc::new(Parse::new(fetch));
+    let task: Arc<dyn Task> = Arc::new(Render::new(parse));
 
     let result = evaluate(&task).unwrap();
 
-    let events = result
-        .downcast_ref::<Vec<Event<'static>>>()
-        .expect("Parse returned the wrong output type");
+    let html = result
+        .downcast_ref::<String>()
+        .expect("Render returned the wrong output type");
 
-    assert_eq!(
-        events,
-        &[
-            Event::Start(Tag::Heading {
-                level: HeadingLevel::H1,
-                id: None,
-                classes: vec![],
-                attrs: vec![],
-            }),
-            Event::Text("Hello".into()),
-            Event::End(TagEnd::Heading(HeadingLevel::H1)),
-        ],
-    );
+    assert_eq!(html, "<h1>Hello</h1>\n");
 }

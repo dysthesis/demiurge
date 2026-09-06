@@ -1,5 +1,6 @@
 pub mod fetch;
 pub mod parse;
+pub mod render;
 use std::{any::Any, io, path::PathBuf, result, str::Utf8Error, sync::Arc};
 
 use thiserror::Error;
