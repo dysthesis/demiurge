@@ -1,8 +1,7 @@
 use std::{
-    collections::HashMap,
-    fmt::Display,
+    fs, io,
     marker::PhantomData,
-    path::{Path, PathBuf},
+    path::{Component, Path},
 };
 
 /// A stable identity for a sequence of bytes.
@@ -36,8 +35,22 @@ pub struct Store<'a, K: Identity> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error<'a> {
-    #[error("The given path has an invalid form: {path}")]
+    #[error("The given path has an invalid form: {path}.")]
     InvalidPathFormat { path: &'a Path },
+
+    #[error("Failed to create directory at {path}.")]
+    CannotCreateDir {
+        path: &'a Path,
+        #[source]
+        error: io::Error,
+    },
+
+    #[error("Cannot inspect store at {path}.")]
+    CannotInspectStore {
+        path: &'a Path,
+        #[source]
+        error: io::Error,
+    },
 }
 
 pub type Result<'a, T> = std::result::Result<T, Error<'a>>;
@@ -50,7 +63,8 @@ impl<'a, K: Identity> Store<'a, K> {
         if !Self::is_valid_path(&path) {
             return Err(Error::InvalidPathFormat { path: &path });
         }
-        if !Self::is_existing_store(&path) {
+
+        if !(Self::is_existing_store(&path)?) {
             todo!("Initialise store")
         }
 
@@ -62,17 +76,49 @@ impl<'a, K: Identity> Store<'a, K> {
 
     #[inline]
     fn is_valid_path(path: &Path) -> bool {
-        todo!("Some function to check that the path string itself is valid")
+        !path.as_os_str().is_empty()
+            && !path
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
     }
 
     #[inline]
-    fn is_existing_store(path: &Path) -> bool {
-        todo!("Some function to check if the given dir is an already existing store.")
+    fn is_existing_store<'p>(path: &'p Path) -> Result<'p, bool> {
+        let metadata = match fs::metadata(path) {
+            Ok(metadata) => metadata,
+
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(false);
+            }
+
+            Err(error) => {
+                return Err(Error::CannotInspectStore { path, error });
+            }
+        };
+
+        if !metadata.is_dir() {
+            return Ok(false);
+        }
+
+        let version = match fs::read(path.join("version")) {
+            Ok(version) => version,
+
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(false);
+            }
+
+            Err(error) => {
+                return Err(Error::CannotInspectStore { path, error });
+            }
+        };
+
+        Ok(version == b"1\n")
     }
 
     #[inline]
     fn initialise_dir(path: &Path) -> Result<()> {
-        todo!("Initialise a given directory as the object store, assuming that it is a valid directory.")
+        // Change if the store layout ever changes.
+        fs::create_dir_all(path).map_err(|error| Error::CannotCreateDir { path, error })
     }
 
     #[inline]
