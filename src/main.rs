@@ -1,3 +1,3 @@
 fn main() {
-    println!("{}", demiurge::greeting());
+    println!("Hello, world!");
 }
