@@ -1,11 +1,13 @@
 use std::{
-    fs, io,
+    fmt::Display,
+    fs,
+    io::{self, Write},
     marker::PhantomData,
     path::{Component, Path, PathBuf},
 };
 
 /// A stable identity for a sequence of bytes.
-pub trait Identity: Clone + PartialEq + Eq {
+pub trait Identity: Clone + PartialEq + Eq + Display {
     /// Derive the key of a chunk of bytes.
     fn of(bytes: &[u8]) -> Self;
 
@@ -27,6 +29,16 @@ impl Identity for Key {
     #[inline]
     fn as_bytes(&self) -> &[u8] {
         &self.0
+    }
+}
+
+impl Display for Key {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for byte in self.0 {
+            write!(f, "{byte:02x}")?;
+        }
+
+        Ok(())
     }
 }
 
@@ -60,6 +72,57 @@ pub enum Error {
         #[source]
         error: io::Error,
     },
+
+    #[error("Object does not exist: {path}.")]
+    ObjectNotFound { path: PathBuf },
+
+    #[error("Cannot read object at {path}.")]
+    CannotReadObject {
+        path: PathBuf,
+        #[source]
+        error: io::Error,
+    },
+
+    #[error("Object at {path} does not match its content identity.")]
+    CorruptObject { path: PathBuf },
+
+    #[error("Two different objects have the same content identity at {path}.")]
+    IdentityCollision { path: PathBuf },
+
+    #[error("Cannot synchronise directory at {path}.")]
+    CannotSyncDir {
+        path: PathBuf,
+        #[source]
+        error: io::Error,
+    },
+
+    #[error("Cannot create temporary object in {path}.")]
+    CannotCreateTemp {
+        path: PathBuf,
+        #[source]
+        error: io::Error,
+    },
+
+    #[error("Cannot write object at {path}.")]
+    CannotWriteObject {
+        path: PathBuf,
+        #[source]
+        error: io::Error,
+    },
+
+    #[error("Cannot synchronise object at {path}.")]
+    CannotSyncObject {
+        path: PathBuf,
+        #[source]
+        error: io::Error,
+    },
+
+    #[error("Cannot publish object at {path}.")]
+    CannotPublishObject {
+        path: PathBuf,
+        #[source]
+        error: io::Error,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -74,7 +137,7 @@ impl<'a, K: Identity> Store<K> {
         }
 
         if !(Self::is_existing_store(&path)?) {
-            todo!("Initialise store");
+            Self::initialise_dir(&path)?;
         }
 
         Ok(Self {
@@ -150,13 +213,189 @@ impl<'a, K: Identity> Store<K> {
         todo!("Helper function to check if the given key.")
     }
 
-    pub fn put(&self, bytes: &[u8]) -> Result<K> {
-        todo!("Implement the method to put some bytes into the store")
+    #[inline]
+    fn object_path(&self, key: &K) -> PathBuf {
+        let key = key.to_string();
+
+        self.path.join("objects").join(&key[..2]).join(&key[2..])
     }
 
-    pub fn get(&self, key: &K) -> Result<Vec<u8>> {
-        todo!("Implement the method to get some bytes associated with the given key")
+    #[inline]
+    fn verify_existing(
+        &self,
+        key: &K,
+        requested: &[u8],
+        existing: &[u8],
+        path: &Path,
+    ) -> Result<()> {
+        if existing == requested {
+            return Ok(());
+        }
+
+        if K::of(existing) == *key {
+            // Existing bytes are different but genuinely have the same
+            // identity.
+            Err(Error::IdentityCollision {
+                path: path.to_owned(),
+            })
+        } else {
+            // The filename says this is `key`, but its contents hash to
+            // something else.
+            Err(Error::CorruptObject {
+                path: path.to_owned(),
+            })
+        }
     }
+
+    pub fn put(&self, bytes: &[u8]) -> Result<K> {
+        let key = K::of(bytes);
+        let path = self.object_path(&key);
+
+        let parent = path.parent().expect("object path always has a parent");
+
+        fs::create_dir_all(parent).map_err(|error| Error::CannotCreateDir {
+            path: parent.to_owned(),
+            error,
+        })?;
+
+        // This is only an optimisation. Correctness must not depend on this
+        // check because another writer can appear/disappear after it.
+        match fs::read(&path) {
+            Ok(existing) => {
+                self.verify_existing(&key, bytes, &existing, &path)?;
+                return Ok(key);
+            }
+
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+
+            Err(error) => {
+                return Err(Error::CannotReadObject { path, error });
+            }
+        }
+
+        // The temporary file lives in the same directory as the final object.
+        // That matters both for publication semantics and because hard links
+        // generally require source and destination to be on the same filesystem.
+        let mut temporary = tempfile::Builder::new()
+            .prefix(".tmp-")
+            .tempfile_in(parent)
+            .map_err(|error| Error::CannotCreateTemp {
+                path: parent.to_owned(),
+                error,
+            })?;
+
+        temporary
+            .write_all(bytes)
+            .map_err(|error| Error::CannotWriteObject {
+                path: temporary.path().to_owned(),
+                error,
+            })?;
+
+        // Ensure all object contents are durable before making the final
+        // filename visible.
+        temporary
+            .as_file()
+            .sync_all()
+            .map_err(|error| Error::CannotSyncObject {
+                path: temporary.path().to_owned(),
+                error,
+            })?;
+
+        loop {
+            match fs::hard_link(temporary.path(), &path) {
+                // Race won, the final pathname now refers to the
+                // already-complete inode.
+                Ok(()) => {
+                    sync_directory(parent)?;
+
+                    // `temporary` dropping removes only its temporary pathname.
+                    // The final hard link remains.
+                    return Ok(key);
+                }
+
+                // Another writer published this identity first.
+                //
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    match fs::read(&path) {
+                        Ok(existing) => {
+                            self.verify_existing(&key, bytes, &existing, &path)?;
+
+                            return Ok(key);
+                        }
+
+                        /*
+                         * Something removed the object between hard_link()
+                         * reporting AlreadyExists and our read.
+                         *
+                         * A normal Store never does this during put(), but this
+                         * also makes the operation behave sensibly alongside a
+                         * future concurrent GC.
+                         */
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                            continue;
+                        }
+
+                        Err(error) => {
+                            return Err(Error::CannotReadObject { path, error });
+                        }
+                    }
+                }
+
+                Err(error) => {
+                    return Err(Error::CannotPublishObject { path, error });
+                }
+            }
+        }
+    }
+    pub fn get(&self, key: &K) -> Result<Vec<u8>> {
+        let path = self.object_path(key);
+
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(Error::ObjectNotFound { path });
+            }
+
+            Err(error) => {
+                return Err(Error::CannotReadObject { path, error });
+            }
+        };
+
+        if K::of(&bytes) != *key {
+            return Err(Error::CorruptObject { path });
+        }
+
+        Ok(bytes)
+    }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
+    let mut result = String::with_capacity(bytes.len() * 2);
+
+    for &byte in bytes {
+        result.push(HEX[(byte >> 4) as usize] as char);
+        result.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+
+    result
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &Path) -> Result<()> {
+    fs::File::open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| Error::CannotSyncDir {
+            path: path.to_owned(),
+            error,
+        })
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_path: &Path) -> Result<()> {
+    todo!("I don't use W*ndows lmao.")
 }
 
 #[cfg(test)]

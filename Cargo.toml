@@ -15,7 +15,6 @@ path = "src/main.rs"
 [dev-dependencies]
 proptest = "1.11.0"
 proptest-derive = "0.8.0"
-tempfile = "3.27.0"
 
 [profile.dev]
 opt-level = 0
@@ -36,3 +35,4 @@ strip = "symbols"
 blake3 = { version = "1.8.7", default-features = false }
 pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
 thiserror = "2.0.20"
+tempfile = "3.27.0"
