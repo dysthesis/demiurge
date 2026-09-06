@@ -1,13 +1,16 @@
 use std::{
     fs, io,
     marker::PhantomData,
-    path::{Component, Path},
+    path::{Component, Path, PathBuf},
 };
 
 /// A stable identity for a sequence of bytes.
 pub trait Identity: Clone + PartialEq + Eq {
     /// Derive the key of a chunk of bytes.
     fn of(bytes: &[u8]) -> Self;
+
+    /// Canonical byte representation of this identity.
+    fn as_bytes(&self) -> &[u8];
 }
 
 /// A standard key for an object in the store. We use blake3 as it is faster than
@@ -16,56 +19,62 @@ pub trait Identity: Clone + PartialEq + Eq {
 pub struct Key([u8; 32]);
 
 impl Identity for Key {
+    #[inline]
     fn of(bytes: &[u8]) -> Self {
         Self(*blake3::hash(bytes).as_bytes())
+    }
+
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        &self.0
     }
 }
 
 /// A content-addressable storage, used to store results from tasks.
-pub struct Store<'a, K: Identity> {
+pub struct Store<K: Identity> {
     /// Where the store's physical backing is located in the filesystem.
     /// We store a reference instead of an owned value in case of an error; since
     /// a sufficiently descriptive error message involves printing the path, the
     /// path would need to live longer than even the store itself sometimes.
     /// Rather than copying, it is more efficient to keep the owned value
     /// somewhere else.
-    path: &'a Path,
+    path: PathBuf,
     _key: PhantomData<K>, // HACK: so that rustc won't complain.
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum Error<'a> {
+pub enum Error {
     #[error("The given path has an invalid form: {path}.")]
-    InvalidPathFormat { path: &'a Path },
+    InvalidPathFormat { path: PathBuf },
 
     #[error("Failed to create directory at {path}.")]
     CannotCreateDir {
-        path: &'a Path,
+        path: PathBuf,
         #[source]
         error: io::Error,
     },
 
     #[error("Cannot inspect store at {path}.")]
     CannotInspectStore {
-        path: &'a Path,
+        path: PathBuf,
         #[source]
         error: io::Error,
     },
 }
 
-pub type Result<'a, T> = std::result::Result<T, Error<'a>>;
+pub type Result<T> = std::result::Result<T, Error>;
 
-impl<'a, K: Identity> Store<'a, K> {
+impl<'a, K: Identity> Store<K> {
     /// Construct a new instance of [`Store`] given a path to a directory that
     /// is/can be used as the physical backing of the data
-    pub fn new(path: &'a Path) -> Result<'a, Self> {
+    pub fn new(path: PathBuf) -> Result<Self> {
         // TODO: path validation
         if !Self::is_valid_path(&path) {
-            return Err(Error::InvalidPathFormat { path: &path });
+            return Err(Error::InvalidPathFormat { path });
         }
 
         if !(Self::is_existing_store(&path)?) {
-            todo!("Initialise store")
+            todo!("Initialise store");
         }
 
         Ok(Self {
@@ -83,7 +92,7 @@ impl<'a, K: Identity> Store<'a, K> {
     }
 
     #[inline]
-    fn is_existing_store<'p>(path: &'p Path) -> Result<'p, bool> {
+    fn is_existing_store(path: &Path) -> Result<bool> {
         let metadata = match fs::metadata(path) {
             Ok(metadata) => metadata,
 
@@ -92,7 +101,10 @@ impl<'a, K: Identity> Store<'a, K> {
             }
 
             Err(error) => {
-                return Err(Error::CannotInspectStore { path, error });
+                return Err(Error::CannotInspectStore {
+                    path: path.into(),
+                    error,
+                });
             }
         };
 
@@ -108,7 +120,10 @@ impl<'a, K: Identity> Store<'a, K> {
             }
 
             Err(error) => {
-                return Err(Error::CannotInspectStore { path, error });
+                return Err(Error::CannotInspectStore {
+                    path: path.into(),
+                    error,
+                });
             }
         };
 
@@ -118,7 +133,10 @@ impl<'a, K: Identity> Store<'a, K> {
     #[inline]
     fn initialise_dir(path: &Path) -> Result<()> {
         // Change if the store layout ever changes.
-        fs::create_dir_all(path).map_err(|error| Error::CannotCreateDir { path, error })
+        fs::create_dir_all(path).map_err(|error| Error::CannotCreateDir {
+            path: path.into(),
+            error,
+        })
     }
 
     #[inline]
@@ -156,7 +174,7 @@ mod tests {
             reps in 1usize..MAX_REPS,
         ) {
             let dir = tempfile::tempdir().unwrap();
-            let store = Store::<Key>::new(dir.path()).unwrap();
+            let store = Store::<Key>::new(dir.path().into()).unwrap();
 
             let expected = store.put(&bytes).unwrap();
             for _ in 1..reps {
@@ -172,7 +190,7 @@ mod tests {
             reps in 1usize..MAX_REPS,
         ) {
             let dir = tempfile::tempdir().unwrap();
-            let store = Store::<Key>::new(dir.path()).unwrap();
+            let store = Store::<Key>::new(dir.path().into()).unwrap();
 
             let key = store.put(&bytes).unwrap();
 
@@ -186,7 +204,7 @@ mod tests {
             bytes in prop::collection::vec(any::<u8>(), 0..MAX_DATA_LEN)
         ) {
             let dir = tempfile::tempdir().unwrap();
-            let store = Store::<Key>::new(dir.path()).unwrap();
+            let store = Store::<Key>::new(dir.path().into()).unwrap();
 
             let key = store.put(&bytes).unwrap();
 
@@ -199,7 +217,7 @@ mod tests {
             reps in 1usize..MAX_REPS,
         ) {
             let dir = tempfile::tempdir().unwrap();
-            let store = Store::<Key>::new(dir.path()).unwrap();
+            let store = Store::<Key>::new(dir.path().into()).unwrap();
 
             let first = store.put(&bytes).unwrap();
 
