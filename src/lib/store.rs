@@ -1,4 +1,9 @@
-use std::{collections::HashMap, fmt::Display, marker::PhantomData, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    marker::PhantomData,
+    path::{Path, PathBuf},
+};
 
 /// A stable identity for a sequence of bytes.
 pub trait Identity: Clone + PartialEq + Eq {
@@ -18,33 +23,74 @@ impl Identity for Key {
 }
 
 /// A content-addressable storage, used to store results from tasks.
-pub struct Store<K: Identity> {
+pub struct Store<'a, K: Identity> {
     /// Where the store's physical backing is located in the filesystem.
-    path: PathBuf,
+    /// We store a reference instead of an owned value in case of an error; since
+    /// a sufficiently descriptive error message involves printing the path, the
+    /// path would need to live longer than even the store itself sometimes.
+    /// Rather than copying, it is more efficient to keep the owned value
+    /// somewhere else.
+    path: &'a Path,
     _key: PhantomData<K>, // HACK: so that rustc won't complain.
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum Error {}
+pub enum Error<'a> {
+    #[error("The given path has an invalid form: {path}")]
+    InvalidPathFormat { path: &'a Path },
+}
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<'a, T> = std::result::Result<T, Error<'a>>;
 
-impl<K: Identity> Store<K> {
+impl<'a, K: Identity> Store<'a, K> {
     /// Construct a new instance of [`Store`] given a path to a directory that
     /// is/can be used as the physical backing of the data
-    pub fn new(path: PathBuf) -> Self {
+    pub fn new(path: &'a Path) -> Result<'a, Self> {
         // TODO: path validation
-        Self {
+        if !Self::is_valid_path(&path) {
+            return Err(Error::InvalidPathFormat { path: &path });
+        }
+        if !Self::is_existing_store(&path) {
+            todo!("Initialise store")
+        }
+
+        Ok(Self {
             path,
             _key: PhantomData::<K>,
-        }
+        })
+    }
+
+    #[inline]
+    fn is_valid_path(path: &Path) -> bool {
+        todo!("Some function to check that the path string itself is valid")
+    }
+
+    #[inline]
+    fn is_existing_store(path: &Path) -> bool {
+        todo!("Some function to check if the given dir is an already existing store.")
+    }
+
+    #[inline]
+    fn initialise_dir(path: &Path) -> Result<()> {
+        todo!("Initialise a given directory as the object store, assuming that it is a valid directory.")
+    }
+
+    #[inline]
+    pub fn contains_bytes(&self, bytes: &[u8]) -> bool {
+        let key = K::of(bytes);
+        self.contains_key(key)
+    }
+
+    #[inline]
+    pub fn contains_key(&self, key: K) -> bool {
+        todo!("Helper function to check if the given key.")
     }
 
     pub fn put(&self, bytes: &[u8]) -> Result<K> {
         todo!("Implement the method to put some bytes into the store")
     }
 
-    pub fn get<'a>(&self, key: &K) -> Result<Vec<u8>> {
+    pub fn get(&self, key: &K) -> Result<Vec<u8>> {
         todo!("Implement the method to get some bytes associated with the given key")
     }
 }
@@ -64,7 +110,7 @@ mod tests {
             reps in 1usize..MAX_REPS,
         ) {
             let dir = tempfile::tempdir().unwrap();
-            let store = Store::<Key>::new(dir.path().into());
+            let store = Store::<Key>::new(dir.path()).unwrap();
 
             let expected = store.put(&bytes).unwrap();
             for _ in 1..reps {
@@ -80,7 +126,7 @@ mod tests {
             reps in 1usize..MAX_REPS,
         ) {
             let dir = tempfile::tempdir().unwrap();
-            let store = Store::<Key>::new(dir.path().into());
+            let store = Store::<Key>::new(dir.path()).unwrap();
 
             let key = store.put(&bytes).unwrap();
 
@@ -94,7 +140,7 @@ mod tests {
             bytes in prop::collection::vec(any::<u8>(), 0..MAX_DATA_LEN)
         ) {
             let dir = tempfile::tempdir().unwrap();
-            let store = Store::<Key>::new(dir.path().into());
+            let store = Store::<Key>::new(dir.path()).unwrap();
 
             let key = store.put(&bytes).unwrap();
 
@@ -107,7 +153,7 @@ mod tests {
             reps in 1usize..MAX_REPS,
         ) {
             let dir = tempfile::tempdir().unwrap();
-            let store = Store::<Key>::new(dir.path().into());
+            let store = Store::<Key>::new(dir.path()).unwrap();
 
             let first = store.put(&bytes).unwrap();
 
