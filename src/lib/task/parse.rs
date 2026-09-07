@@ -1,71 +1,44 @@
-use pulldown_cmark::{Event, Parser};
+use pulldown_cmark::Parser;
 
-use crate::task::{Error, Output, Result, Task};
-use std::sync::Arc;
+use crate::task::{Error, Output, Spec};
 
-/// A [`Task`] which parses the contents of the given [`Task`]'s output as
-/// Markdown.
-pub struct Parse(Arc<dyn Task>);
+/// A task specification which parses UTF-8 Markdown.
+pub struct Parse;
 impl Parse {
     #[inline]
-    pub fn new(input: Arc<dyn Task>) -> Self {
-        Self(input)
-    }
-}
+    pub fn spec() -> impl Spec {
+        |dependencies: &[Output]| {
+            let [source] = dependencies else {
+                return Err(Error::DependencyCount {
+                    expected: 1,
+                    actual: dependencies.len(),
+                });
+            };
 
-impl Task for Parse {
-    fn dependencies(&self) -> Vec<Arc<dyn Task>> {
-        vec![self.0.clone()]
-    }
-    fn run(&self, dependencies: &[Output]) -> Result<Output> {
-        let [source] = dependencies else {
-            return Err(Error::DependencyCount {
-                expected: 1,
-                actual: dependencies.len(),
-            });
-        };
-
-        let source = source
-            .downcast_ref::<Vec<u8>>()
-            .ok_or(Error::DependencyType { index: 0 })?;
-
-        let source = std::str::from_utf8(source)?;
-
-        let events: Vec<Event<'static>> = Parser::new(source).map(Event::into_static).collect();
-
-        Ok(Arc::new(events))
+            let source = std::str::from_utf8(source)?;
+            // simplification: Store accepts bytes, so Render reparses until a
+            // stable event encoding is introduced.
+            Parser::new(source).for_each(drop);
+            Ok(source.as_bytes().to_vec())
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::task::Result;
+
     use super::*;
     use proptest::prelude::*;
 
-    struct DummySource;
-
-    impl Task for DummySource {
-        fn dependencies(&self) -> Vec<Arc<dyn Task>> {
-            vec![]
-        }
-
-        fn run(&self, _dependencies: &[Output]) -> Result<Output> {
-            unreachable!("DummySource should not be evaluated in Parse unit tests")
-        }
-    }
-
-    fn source_task() -> Arc<dyn Task> {
-        Arc::new(DummySource)
-    }
     fn run_parse(source: impl Into<Vec<u8>>) -> Result<Output> {
-        let dependency: Output = Arc::new(source.into());
-        Parse::new(source_task()).run(std::slice::from_ref(&dependency))
+        Parse::spec()(std::slice::from_ref(&source.into()))
     }
 
     #[test]
     fn missing_dependency_returns_error() {
         assert!(matches!(
-            Parse::new(source_task()).run(&[]),
+            Parse::spec()(&[]),
             Err(Error::DependencyCount {
                 expected: 1,
                 actual: 0,
@@ -75,25 +48,15 @@ mod tests {
 
     #[test]
     fn extra_dependency_returns_error() {
-        let dependency: Output = Arc::new(Vec::<u8>::new());
+        let dependency = Vec::new();
         let dependencies = [dependency.clone(), dependency];
 
         assert!(matches!(
-            Parse::new(source_task()).run(&dependencies),
+            Parse::spec()(&dependencies),
             Err(Error::DependencyCount {
                 expected: 1,
                 actual: 2,
             }),
-        ));
-    }
-
-    #[test]
-    fn wrong_dependency_type_returns_error() {
-        let dependency: Output = Arc::new(String::new());
-
-        assert!(matches!(
-            Parse::new(source_task()).run(std::slice::from_ref(&dependency)),
-            Err(Error::DependencyType { index: 0 }),
         ));
     }
 
@@ -103,6 +66,11 @@ mod tests {
             run_parse([0xff]),
             Err(crate::task::Error::InvalidUtf8(_)),
         ));
+    }
+
+    #[test]
+    fn preserves_valid_markdown_for_rendering() {
+        assert_eq!(run_parse("# Hello").unwrap(), b"# Hello");
     }
 
     proptest! {

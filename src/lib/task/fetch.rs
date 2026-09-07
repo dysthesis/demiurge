@@ -1,29 +1,25 @@
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{fs, path::PathBuf};
 
-use crate::task::{Error, Output, Result, Task};
+use crate::task::{Error, Output, Spec};
 
-/// A [`Task`] which fetches the content of the given path. It is a leaf Task,
-/// which means that it does not depend on anything else.
-pub struct Fetch(PathBuf);
+/// A task specification which reads the content of a path.
+pub struct Fetch;
 impl Fetch {
     #[inline]
-    pub fn new(path: PathBuf) -> Self {
-        Self(path)
-    }
-}
+    pub fn spec(path: PathBuf) -> impl Spec {
+        move |dependencies: &[Output]| {
+            if !dependencies.is_empty() {
+                return Err(Error::DependencyCount {
+                    expected: 0,
+                    actual: dependencies.len(),
+                });
+            }
 
-impl Task for Fetch {
-    fn dependencies(&self) -> Vec<std::sync::Arc<dyn Task>> {
-        vec![]
-    }
-
-    fn run(&self, _dependencies: &[Output]) -> Result<Output> {
-        let contents = fs::read(&self.0).map_err(|source| Error::Read {
-            path: self.0.clone(),
-            source,
-        })?;
-
-        Ok(Arc::new(contents))
+            fs::read(&path).map_err(|source| Error::Read {
+                path: path.clone(),
+                source,
+            })
+        }
     }
 }
 
@@ -34,17 +30,17 @@ mod tests {
 
     use super::*;
 
-    fn output(output: &Output) -> &Vec<u8> {
-        output
-            .downcast_ref::<Vec<u8>>()
-            .expect("Fetch returned the wrong output type")
-    }
-
     #[test]
-    fn has_no_dependencies() {
-        let fetch = Fetch(PathBuf::from("anything"));
+    fn rejects_dependencies() {
+        let result = Fetch::spec(PathBuf::from("anything"))(&[Vec::new()]);
 
-        assert!(fetch.dependencies().is_empty());
+        assert!(matches!(
+            result,
+            Err(Error::DependencyCount {
+                expected: 0,
+                actual: 1,
+            })
+        ));
     }
 
     #[test]
@@ -52,7 +48,7 @@ mod tests {
         let directory = tempdir().unwrap();
         let path = directory.path().join("missing");
 
-        let error = match Fetch(path.clone()).run(&[]) {
+        let error = match Fetch::spec(path.clone())(&[]) {
             Err(error) => error,
             Ok(_) => panic!("missing file should fail"),
         };
@@ -76,15 +72,15 @@ mod tests {
 
         fs::write(&path, b"before").unwrap();
 
-        let first = Fetch(path.clone()).run(&[]).unwrap();
+        let first = Fetch::spec(path.clone())(&[]).unwrap();
 
-        assert_eq!(output(&first), b"before");
+        assert_eq!(first, b"before");
 
         fs::write(&path, b"after").unwrap();
 
-        let second = Fetch(path).run(&[]).unwrap();
+        let second = Fetch::spec(path)(&[]).unwrap();
 
-        assert_eq!(output(&second), b"after");
+        assert_eq!(second, b"after");
     }
 
     proptest! {
@@ -97,12 +93,9 @@ mod tests {
 
             fs::write(&path, &contents).unwrap();
 
-            let result = Fetch(path).run(&[]).unwrap();
+            let result = Fetch::spec(path)(&[]).unwrap();
 
-            prop_assert_eq!(
-                output(&result),
-                &contents,
-            );
+            prop_assert_eq!(result, contents);
         }
     }
 }
