@@ -12,6 +12,7 @@
         packages =
           (with pkgs; [
             cargo-mutants
+            bacon
             statix
             deadnix
             alejandra
