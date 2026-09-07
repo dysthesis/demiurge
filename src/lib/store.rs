@@ -127,7 +127,7 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-impl<'a, K: Identity> Store<K> {
+impl<K: Identity> Store<K> {
     /// Construct a new instance of [`Store`] given a path to a directory that
     /// is/can be used as the physical backing of the data
     pub fn new(path: PathBuf) -> Result<Self> {
@@ -368,19 +368,6 @@ impl<'a, K: Identity> Store<K> {
 
         Ok(bytes)
     }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-
-    let mut result = String::with_capacity(bytes.len() * 2);
-
-    for &byte in bytes {
-        result.push(HEX[(byte >> 4) as usize] as char);
-        result.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-
-    result
 }
 
 #[cfg(unix)]
