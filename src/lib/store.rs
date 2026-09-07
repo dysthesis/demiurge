@@ -284,22 +284,21 @@ impl<K: Identity> Store<K> {
                 error,
             })?;
 
-        temporary
-            .write_all(bytes)
-            .map_err(|error| Error::CannotWriteObject {
+        temporary.write_all(bytes).map_err(|error| {
+            Error::CannotWriteObject {
                 path: temporary.path().to_owned(),
                 error,
-            })?;
+            }
+        })?;
 
         // Ensure all object contents are durable before making the final
         // filename visible.
-        temporary
-            .as_file()
-            .sync_all()
-            .map_err(|error| Error::CannotSyncObject {
+        temporary.as_file().sync_all().map_err(|error| {
+            Error::CannotSyncObject {
                 path: temporary.path().to_owned(),
                 error,
-            })?;
+            }
+        })?;
 
         loop {
             match fs::hard_link(temporary.path(), &path) {
@@ -318,7 +317,9 @@ impl<K: Identity> Store<K> {
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                     match fs::read(&path) {
                         Ok(existing) => {
-                            self.verify_existing(&key, bytes, &existing, &path)?;
+                            self.verify_existing(
+                                &key, bytes, &existing, &path,
+                            )?;
 
                             return Ok(key);
                         }
@@ -331,12 +332,17 @@ impl<K: Identity> Store<K> {
                          * also makes the operation behave sensibly alongside a
                          * future concurrent GC.
                          */
-                        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                        Err(error)
+                            if error.kind() == io::ErrorKind::NotFound =>
+                        {
                             continue;
                         }
 
                         Err(error) => {
-                            return Err(Error::CannotReadObject { path, error });
+                            return Err(Error::CannotReadObject {
+                                path,
+                                error,
+                            });
                         }
                     }
                 }
