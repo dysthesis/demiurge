@@ -127,7 +127,7 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-impl<'a, K: Identity> Store<K> {
+impl<K: Identity> Store<K> {
     /// Construct a new instance of [`Store`] given a path to a directory that
     /// is/can be used as the physical backing of the data
     pub fn new(path: PathBuf) -> Result<Self> {
@@ -136,7 +136,7 @@ impl<'a, K: Identity> Store<K> {
             return Err(Error::InvalidPathFormat { path });
         }
 
-        if !(Self::is_existing_store(&path)?) {
+        if !Self::is_existing_store(&path)? {
             Self::initialise_dir(&path)?;
         }
 
@@ -205,12 +205,12 @@ impl<'a, K: Identity> Store<K> {
     #[inline]
     pub fn contains_bytes(&self, bytes: &[u8]) -> bool {
         let key = K::of(bytes);
-        self.contains_key(key)
+        self.contains_key(&key)
     }
 
     #[inline]
-    pub fn contains_key(&self, key: K) -> bool {
-        todo!("Helper function to check if the given key.")
+    pub fn contains_key(&self, key: &K) -> bool {
+        self.object_path(key).is_file()
     }
 
     #[inline]
@@ -284,22 +284,21 @@ impl<'a, K: Identity> Store<K> {
                 error,
             })?;
 
-        temporary
-            .write_all(bytes)
-            .map_err(|error| Error::CannotWriteObject {
+        temporary.write_all(bytes).map_err(|error| {
+            Error::CannotWriteObject {
                 path: temporary.path().to_owned(),
                 error,
-            })?;
+            }
+        })?;
 
         // Ensure all object contents are durable before making the final
         // filename visible.
-        temporary
-            .as_file()
-            .sync_all()
-            .map_err(|error| Error::CannotSyncObject {
+        temporary.as_file().sync_all().map_err(|error| {
+            Error::CannotSyncObject {
                 path: temporary.path().to_owned(),
                 error,
-            })?;
+            }
+        })?;
 
         loop {
             match fs::hard_link(temporary.path(), &path) {
@@ -318,7 +317,9 @@ impl<'a, K: Identity> Store<K> {
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                     match fs::read(&path) {
                         Ok(existing) => {
-                            self.verify_existing(&key, bytes, &existing, &path)?;
+                            self.verify_existing(
+                                &key, bytes, &existing, &path,
+                            )?;
 
                             return Ok(key);
                         }
@@ -331,12 +332,17 @@ impl<'a, K: Identity> Store<K> {
                          * also makes the operation behave sensibly alongside a
                          * future concurrent GC.
                          */
-                        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                        Err(error)
+                            if error.kind() == io::ErrorKind::NotFound =>
+                        {
                             continue;
                         }
 
                         Err(error) => {
-                            return Err(Error::CannotReadObject { path, error });
+                            return Err(Error::CannotReadObject {
+                                path,
+                                error,
+                            });
                         }
                     }
                 }
@@ -368,19 +374,6 @@ impl<'a, K: Identity> Store<K> {
 
         Ok(bytes)
     }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-
-    let mut result = String::with_capacity(bytes.len() * 2);
-
-    for &byte in bytes {
-        result.push(HEX[(byte >> 4) as usize] as char);
-        result.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-
-    result
 }
 
 #[cfg(unix)]

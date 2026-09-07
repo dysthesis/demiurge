@@ -1,17 +1,11 @@
-use std::{fs, sync::Arc};
+use std::fs;
 
-use demiurge::task::{self, fetch::Fetch, parse::Parse, render::Render, Output, Task};
+use demiurge::{
+    context::Ctx,
+    store::{Key, Store},
+    task::{fetch::Fetch, parse::Parse, render::Render},
+};
 use tempfile::tempdir;
-
-fn evaluate(task: &Arc<dyn Task>) -> task::Result<Output> {
-    let dependencies = task
-        .dependencies()
-        .iter()
-        .map(evaluate)
-        .collect::<Result<Vec<_>, _>>()?;
-
-    task.run(&dependencies)
-}
 
 #[test]
 fn fetch_parse_and_render() {
@@ -20,15 +14,18 @@ fn fetch_parse_and_render() {
 
     fs::write(&path, "# Hello").unwrap();
 
-    let fetch = Arc::new(Fetch::new(path));
-    let parse = Arc::new(Parse::new(fetch));
-    let task: Arc<dyn Task> = Arc::new(Render::new(parse));
+    let store = Store::<Key>::new(directory.path().join("store")).unwrap();
+    let mut ctx = Ctx::new(store);
+    let fetch = ctx.add_task(Fetch::new(path)).unwrap();
+    let parse = ctx.add_task(Parse::new(fetch)).unwrap();
+    let render = ctx.add_task(Render::new(parse)).unwrap();
 
-    let result = evaluate(&task).unwrap();
+    ctx.run_task(fetch).unwrap();
+    ctx.run_task(parse).unwrap();
+    ctx.run_task(render).unwrap();
 
-    let html = result
-        .downcast_ref::<String>()
-        .expect("Render returned the wrong output type");
+    let key = ctx.task_result(render).unwrap().unwrap();
+    let html = ctx.get_object(&key).unwrap();
 
-    assert_eq!(html, "<h1>Hello</h1>\n");
+    assert_eq!(html, b"<h1>Hello</h1>\n");
 }

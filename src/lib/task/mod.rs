@@ -1,20 +1,26 @@
 pub mod fetch;
 pub mod parse;
 pub mod render;
-use std::{any::Any, io, path::PathBuf, result, str::Utf8Error, sync::Arc};
+use std::{io, path::PathBuf, result, str::Utf8Error};
 
 use thiserror::Error;
 
-// NOTE: This is a placeholder output type until we get Store implemented.
-pub type Output = Arc<dyn Any + Send + Sync>;
+use crate::{
+    context::{self, Ctx, TaskId},
+    store::Key,
+};
+
+/// The serialisable value passed between task specifications.
+pub type Output = Vec<u8>;
 pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error(transparent)]
+    Context(#[from] context::Error),
+
     #[error("expected {expected} dependency outputs, got {actual}")]
     DependencyCount { expected: usize, actual: usize },
-    #[error("dependency output at index {index} has an unexpected type")]
-    DependencyType { index: usize },
     #[error("failed to read {path}: {source}")]
     Read {
         path: PathBuf,
@@ -23,54 +29,169 @@ pub enum Error {
     },
     #[error("Markdown source is not valid UTF-8: {0}")]
     InvalidUtf8(#[from] Utf8Error),
+
+    #[error("one or more task dependencies have not completed")]
+    DependencyOutputUnsatisfied,
+    #[error("task specification has already been consumed")]
+    TaskConsumed,
 }
 
-/// A unit of work in our build system.
-pub trait Task: Send + Sync {
-    /// List of other tasks whose output it needs to build.
-    fn dependencies(&self) -> Vec<Arc<dyn Task>>;
-    /// Take in the dependencies' output and builds its own output. This assumes
-    /// that `dependencies` are up-to-date.
-    fn run(&self, dependencies: &[Output]) -> Result<Output>;
+/// The actual function that builds the desired output, given its list of
+/// dependencies. A specification is one-shot because its task runs at most once
+/// in a build.
+pub trait Spec: Send + FnOnce(&[Output]) -> Result<Output> {}
+
+impl<T> Spec for T where T: Send + FnOnce(&[Output]) -> Result<Output> {}
+
+/// The execution state of a task.
+#[derive(Debug)]
+pub enum State {
+    Pending,
+    Done(Key),
+    Failed,
+}
+
+/// A unit of work in our build systems. Produces an object that is stored in
+/// [`crate::store::Store`], providing us with a key to it, and optionally
+/// requires the outputs of other tasks as dependencies.
+pub struct Task {
+    deps: Vec<TaskId>,
+    spec: Option<Box<dyn Spec>>,
+    state: State,
+}
+
+impl Task {
+    /// Construct a task from a custom specification and its dependencies.
+    pub fn new<S>(spec: S, dependencies: Vec<TaskId>) -> Self
+    where
+        S: Spec + 'static,
+    {
+        Self {
+            deps: dependencies,
+            spec: Some(Box::new(spec)),
+            state: State::Pending,
+        }
+    }
+
+    #[inline]
+    fn get_deps_results(&self, ctx: &Ctx) -> Result<Vec<Output>> {
+        self.deps
+            .iter()
+            .map(|&id| -> Result<Output> {
+                let key = ctx
+                    .task_result(id)?
+                    .ok_or(Error::DependencyOutputUnsatisfied)?;
+                Ok(ctx.get_object(&key)?)
+            })
+            .collect()
+    }
+
+    pub fn run(&mut self, ctx: &Ctx) -> Result<()> {
+        match &self.state {
+            State::Done(_) => return Ok(()),
+            State::Failed => return Err(Error::TaskConsumed),
+            State::Pending => {}
+        }
+
+        let deps = self.get_deps_results(ctx)?;
+        let spec = self.spec.take().ok_or(Error::TaskConsumed)?;
+
+        match spec(&deps)
+            .and_then(|output| ctx.publish_object(&output).map_err(Error::from))
+        {
+            Ok(key) => {
+                self.state = State::Done(key);
+                Ok(())
+            }
+            Err(error) => {
+                self.state = State::Failed;
+                Err(error)
+            }
+        }
+    }
+
+    pub fn result(&self) -> Option<Key> {
+        match &self.state {
+            State::Pending | State::Failed => None,
+            State::Done(res) => Some(res.clone()),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::context::Ctx;
+    use crate::store::{Key, Store};
+
     use super::*;
 
-    /// Contrived, basic task for testing.
-    struct Constant(i32);
-
-    impl Task for Constant {
-        fn dependencies(&self) -> Vec<Arc<dyn Task>> {
-            vec![]
-        }
-
-        fn run(&self, _dependencies: &[Output]) -> Result<Output> {
-            Ok(Arc::new(self.0))
-        }
+    fn context() -> (tempfile::TempDir, Ctx) {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::<Key>::new(directory.path().join("store")).unwrap();
+        (directory, Ctx::new(store))
     }
 
-    fn assert_send_sync<T: Send + Sync>() {}
+    fn assert_send<T: Send>() {}
 
     #[test]
-    fn task_is_dyn_compatible() {
-        let _: Arc<dyn Task> = Arc::new(Constant(42));
+    fn spec_is_dyn_compatible() {
+        let _: Box<dyn Spec> =
+            Box::new(|_: &[Output]| Ok(b"constant".to_vec()));
     }
 
     #[test]
-    fn task_references_are_send_and_sync() {
-        assert_send_sync::<Arc<dyn Task>>();
-        assert_send_sync::<Output>();
-        assert_send_sync::<Error>();
+    fn tasks_and_errors_are_send() {
+        assert_send::<Box<dyn Spec>>();
+        assert_send::<Task>();
+        assert_send::<Error>();
     }
 
     #[test]
-    fn task_can_produce_an_erased_output() {
-        let task: Arc<dyn Task> = Arc::new(Constant(42));
+    fn task_publishes_its_output() {
+        let (_directory, mut ctx) = context();
+        let task = ctx
+            .add_task(Task::new(
+                |_: &[Output]| Ok(b"constant".to_vec()),
+                vec![],
+            ))
+            .unwrap();
 
-        let output = task.run(&[]).unwrap();
+        ctx.run_task(task).unwrap();
 
-        assert_eq!(output.downcast_ref::<i32>(), Some(&42));
+        let key = ctx.task_result(task).unwrap().unwrap();
+        assert_eq!(ctx.get_object(&key).unwrap(), b"constant");
+    }
+
+    #[test]
+    fn task_waits_for_its_dependencies() {
+        let (_directory, mut ctx) = context();
+        let dependency = ctx
+            .add_task(Task::new(
+                |_: &[Output]| Ok(b"dependency".to_vec()),
+                vec![],
+            ))
+            .unwrap();
+        let task = ctx
+            .add_task(Task::new(
+                |dependencies: &[Output]| {
+                    let [dependency] = dependencies else {
+                        unreachable!("Task checked its dependency count")
+                    };
+                    Ok([dependency.as_slice(), b" output"].concat())
+                },
+                vec![dependency],
+            ))
+            .unwrap();
+
+        assert!(matches!(
+            ctx.run_task(task),
+            Err(Error::DependencyOutputUnsatisfied)
+        ));
+
+        ctx.run_task(dependency).unwrap();
+        ctx.run_task(task).unwrap();
+
+        let key = ctx.task_result(task).unwrap().unwrap();
+        assert_eq!(ctx.get_object(&key).unwrap(), b"dependency output");
     }
 }

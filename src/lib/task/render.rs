@@ -1,69 +1,55 @@
-use std::sync::Arc;
+use pulldown_cmark::Parser;
 
-use pulldown_cmark::Event;
+use crate::{
+    context::TaskId,
+    task::{Error, Output, Spec, Task},
+};
 
-use crate::task::{parse::Parse, Error, Task};
-
-pub struct Render(Arc<dyn Task>);
+/// A task specification which renders stored Markdown as HTML.
+pub struct Render {
+    input: TaskId,
+}
 impl Render {
     #[inline]
-    pub fn new(input: Arc<dyn Task>) -> Self {
-        Self(input)
+    pub fn new(input: TaskId) -> Self {
+        Self { input }
+    }
+
+    #[inline]
+    fn spec() -> impl Spec {
+        |dependencies: &[Output]| {
+            let [parsed] = dependencies else {
+                return Err(Error::DependencyCount {
+                    expected: 1,
+                    actual: dependencies.len(),
+                });
+            };
+
+            let source = std::str::from_utf8(parsed)?;
+
+            let mut rendered = String::new();
+            pulldown_cmark::html::push_html(&mut rendered, Parser::new(source));
+            Ok(rendered.into_bytes())
+        }
     }
 }
 
-impl Task for Render {
-    fn dependencies(&self) -> Vec<Arc<dyn Task>> {
-        vec![self.0.clone()]
-    }
-
-    fn run(&self, dependencies: &[super::Output]) -> super::Result<super::Output> {
-        let [parsed] = dependencies else {
-            return Err(Error::DependencyCount {
-                expected: 1,
-                actual: dependencies.len(),
-            });
-        };
-
-        let mut rendered = String::new();
-        pulldown_cmark::html::push_html(
-            &mut rendered,
-            parsed
-                .downcast_ref::<Vec<Event>>()
-                .expect("Parse returned the wrong output type")
-                .into_iter()
-                .cloned(),
-        );
-        Ok(Arc::new(rendered))
+impl From<Render> for Task {
+    fn from(render: Render) -> Self {
+        Task::new(Render::spec(), vec![render.input])
     }
 }
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
-    use pulldown_cmark::{HeadingLevel, Tag, TagEnd};
-
-    use crate::task::{fetch::Fetch, Output};
-
     use super::*;
 
-    fn render() -> Render {
-        let fetch = Arc::new(Fetch::new(PathBuf::new()));
-        let parse = Arc::new(Parse::new(fetch));
-
-        Render::new(parse)
-    }
-
-    #[test]
-    fn has_one_dependency() {
-        let render = render();
-
-        assert_eq!(render.dependencies().len(), 1);
+    fn parsed(source: &str) -> Output {
+        source.as_bytes().to_vec()
     }
 
     #[test]
     fn rejects_no_dependencies() {
-        let result = render().run(&[]);
+        let result = Render::spec()(&[]);
 
         assert!(matches!(
             result,
@@ -76,9 +62,9 @@ mod tests {
 
     #[test]
     fn rejects_multiple_dependencies() {
-        let output: Output = Arc::new(Vec::<Event<'static>>::new());
+        let output = parsed("");
 
-        let result = render().run(&[output.clone(), output]);
+        let result = Render::spec()(&[output.clone(), output]);
 
         assert!(matches!(
             result,
@@ -90,31 +76,19 @@ mod tests {
     }
 
     #[test]
-    fn renders_events_as_html() {
-        let parsed: Output = Arc::new(vec![
-            Event::Start(Tag::Heading {
-                level: HeadingLevel::H1,
-                id: None,
-                classes: vec![],
-                attrs: vec![],
-            }),
-            Event::Text("Hello".into()),
-            Event::End(TagEnd::Heading(HeadingLevel::H1)),
-        ]);
+    fn renders_markdown_as_html() {
+        let result = Render::spec()(&[parsed("# Hello")]).unwrap();
 
-        let result = render().run(&[parsed]).unwrap();
-
-        let html = result
-            .downcast_ref::<String>()
-            .expect("Render returned the wrong output type");
-
-        assert_eq!(html, "<h1>Hello</h1>\n");
+        assert_eq!(result, b"<h1>Hello</h1>\n");
     }
-    #[test]
-    #[should_panic(expected = "Parse returned the wrong output type")]
-    fn rejects_wrong_dependency_type() {
-        let dependency: Output = Arc::new(String::from("not parsed events"));
 
-        let _ = render().run(&[dependency]);
+    #[test]
+    fn rejects_invalid_utf8() {
+        let dependency = vec![0xff];
+
+        assert!(matches!(
+            Render::spec()(&[dependency]),
+            Err(Error::InvalidUtf8(_))
+        ));
     }
 }
