@@ -55,20 +55,21 @@ impl Ctx {
         }
     }
 
-    /// Add one task into the map
-    pub fn add_task(&mut self, task: Task) -> Result<TaskId> {
+    /// Add one task or task specification into the map.
+    pub fn add_task<T: Into<Task>>(&mut self, task: T) -> Result<TaskId> {
         self.tasks.try_reserve(1).map_err(|_| Error::TasksFull)?;
 
         let id = self.tasks.len();
-        self.tasks.push(Mutex::new(task));
+        self.tasks.push(Mutex::new(task.into()));
         Ok(TaskId(id))
     }
 
-    /// Add multiple tasks into the map
-    pub fn add_tasks<I: IntoIterator<Item = Task>>(
-        &mut self,
-        tasks: I,
-    ) -> Result<Vec<TaskId>> {
+    /// Add multiple tasks or task specifications into the map.
+    pub fn add_tasks<I, T>(&mut self, tasks: I) -> Result<Vec<TaskId>>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<Task>,
+    {
         let mut ids = Vec::new();
         for task in tasks {
             ids.push(self.add_task(task)?);

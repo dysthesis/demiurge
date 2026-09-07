@@ -1,12 +1,18 @@
 use std::{fs, path::PathBuf};
 
-use crate::task::{Error, Output, Spec};
+use crate::task::{Error, Output, Spec, Task};
 
 /// A task specification which reads the content of a path.
-pub struct Fetch;
+pub struct Fetch(PathBuf);
 impl Fetch {
     #[inline]
-    pub fn spec(path: PathBuf) -> impl Spec {
+    pub fn new(path: PathBuf) -> Self {
+        Self(path)
+    }
+
+    #[inline]
+    fn spec(self) -> impl Spec {
+        let Self(path) = self;
         move |dependencies: &[Output]| {
             if !dependencies.is_empty() {
                 return Err(Error::DependencyCount {
@@ -15,11 +21,14 @@ impl Fetch {
                 });
             }
 
-            fs::read(&path).map_err(|source| Error::Read {
-                path: path.clone(),
-                source,
-            })
+            fs::read(&path).map_err(|source| Error::Read { path, source })
         }
+    }
+}
+
+impl From<Fetch> for Task {
+    fn from(fetch: Fetch) -> Self {
+        Task::new(fetch.spec(), vec![])
     }
 }
 
@@ -32,7 +41,8 @@ mod tests {
 
     #[test]
     fn rejects_dependencies() {
-        let result = Fetch::spec(PathBuf::from("anything"))(&[Vec::new()]);
+        let result =
+            Fetch::new(PathBuf::from("anything")).spec()(&[Vec::new()]);
 
         assert!(matches!(
             result,
@@ -48,7 +58,7 @@ mod tests {
         let directory = tempdir().unwrap();
         let path = directory.path().join("missing");
 
-        let error = match Fetch::spec(path.clone())(&[]) {
+        let error = match Fetch::new(path.clone()).spec()(&[]) {
             Err(error) => error,
             Ok(_) => panic!("missing file should fail"),
         };
@@ -72,13 +82,13 @@ mod tests {
 
         fs::write(&path, b"before").unwrap();
 
-        let first = Fetch::spec(path.clone())(&[]).unwrap();
+        let first = Fetch::new(path.clone()).spec()(&[]).unwrap();
 
         assert_eq!(first, b"before");
 
         fs::write(&path, b"after").unwrap();
 
-        let second = Fetch::spec(path)(&[]).unwrap();
+        let second = Fetch::new(path).spec()(&[]).unwrap();
 
         assert_eq!(second, b"after");
     }
@@ -93,7 +103,7 @@ mod tests {
 
             fs::write(&path, &contents).unwrap();
 
-            let result = Fetch::spec(path)(&[]).unwrap();
+            let result = Fetch::new(path).spec()(&[]).unwrap();
 
             prop_assert_eq!(result, contents);
         }

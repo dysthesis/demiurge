@@ -61,18 +61,16 @@ pub struct Task {
 }
 
 impl Task {
-    pub fn register(
-        ctx: &mut Ctx,
-        spec: Box<dyn Spec>,
-        dependencies: Vec<TaskId>,
-    ) -> Result<TaskId> {
-        let this = Task {
+    /// Construct a task from a custom specification and its dependencies.
+    pub fn new<S>(spec: S, dependencies: Vec<TaskId>) -> Self
+    where
+        S: Spec + 'static,
+    {
+        Self {
             deps: dependencies,
-            spec: Some(spec),
+            spec: Some(Box::new(spec)),
             state: State::Pending,
-        };
-
-        Ok(ctx.add_task(this)?)
+        }
     }
 
     #[inline]
@@ -122,6 +120,7 @@ impl Task {
 
 #[cfg(test)]
 mod tests {
+    use crate::context::Ctx;
     use crate::store::{Key, Store};
 
     use super::*;
@@ -150,12 +149,12 @@ mod tests {
     #[test]
     fn task_publishes_its_output() {
         let (_directory, mut ctx) = context();
-        let task = Task::register(
-            &mut ctx,
-            Box::new(|_: &[Output]| Ok(b"constant".to_vec())),
-            vec![],
-        )
-        .unwrap();
+        let task = ctx
+            .add_task(Task::new(
+                |_: &[Output]| Ok(b"constant".to_vec()),
+                vec![],
+            ))
+            .unwrap();
 
         ctx.run_task(task).unwrap();
 
@@ -166,23 +165,23 @@ mod tests {
     #[test]
     fn task_waits_for_its_dependencies() {
         let (_directory, mut ctx) = context();
-        let dependency = Task::register(
-            &mut ctx,
-            Box::new(|_: &[Output]| Ok(b"dependency".to_vec())),
-            vec![],
-        )
-        .unwrap();
-        let task = Task::register(
-            &mut ctx,
-            Box::new(|dependencies: &[Output]| {
-                let [dependency] = dependencies else {
-                    unreachable!("Task checked its dependency count")
-                };
-                Ok([dependency.as_slice(), b" output"].concat())
-            }),
-            vec![dependency],
-        )
-        .unwrap();
+        let dependency = ctx
+            .add_task(Task::new(
+                |_: &[Output]| Ok(b"dependency".to_vec()),
+                vec![],
+            ))
+            .unwrap();
+        let task = ctx
+            .add_task(Task::new(
+                |dependencies: &[Output]| {
+                    let [dependency] = dependencies else {
+                        unreachable!("Task checked its dependency count")
+                    };
+                    Ok([dependency.as_slice(), b" output"].concat())
+                },
+                vec![dependency],
+            ))
+            .unwrap();
 
         assert!(matches!(
             ctx.run_task(task),

@@ -3,7 +3,7 @@ use std::fs;
 use demiurge::{
     context::Ctx,
     store::{Key, Store},
-    task::{Task, fetch::Fetch, parse::Parse, render::Render},
+    task::{fetch::Fetch, parse::Parse, render::Render},
 };
 use tempfile::tempdir;
 
@@ -16,13 +16,9 @@ fn fetch_parse_and_render() {
 
     let store = Store::<Key>::new(directory.path().join("store")).unwrap();
     let mut ctx = Ctx::new(store);
-    let fetch =
-        Task::register(&mut ctx, Box::new(Fetch::spec(path)), vec![]).unwrap();
-    let parse =
-        Task::register(&mut ctx, Box::new(Parse::spec()), vec![fetch]).unwrap();
-    let render =
-        Task::register(&mut ctx, Box::new(Render::spec()), vec![parse])
-            .unwrap();
+    let fetch = ctx.add_task(Fetch::new(path)).unwrap();
+    let parse = ctx.add_task(Parse::new(fetch)).unwrap();
+    let render = ctx.add_task(Render::new(parse)).unwrap();
 
     ctx.run_task(fetch).unwrap();
     ctx.run_task(parse).unwrap();

@@ -1,12 +1,22 @@
 use pulldown_cmark::Parser;
 
-use crate::task::{Error, Output, Spec};
+use crate::{
+    context::TaskId,
+    task::{Error, Output, Spec, Task},
+};
 
 /// A task specification which parses UTF-8 Markdown.
-pub struct Parse;
+pub struct Parse {
+    input: TaskId,
+}
 impl Parse {
     #[inline]
-    pub fn spec() -> impl Spec {
+    pub fn new(input: TaskId) -> Self {
+        Self { input }
+    }
+
+    #[inline]
+    fn spec() -> impl Spec {
         |dependencies: &[Output]| {
             let [source] = dependencies else {
                 return Err(Error::DependencyCount {
@@ -21,6 +31,12 @@ impl Parse {
             Parser::new(source).for_each(drop);
             Ok(source.as_bytes().to_vec())
         }
+    }
+}
+
+impl From<Parse> for Task {
+    fn from(parse: Parse) -> Self {
+        Task::new(Parse::spec(), vec![parse.input])
     }
 }
 

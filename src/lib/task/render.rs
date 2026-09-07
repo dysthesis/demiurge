@@ -1,12 +1,22 @@
 use pulldown_cmark::Parser;
 
-use crate::task::{Error, Output, Spec};
+use crate::{
+    context::TaskId,
+    task::{Error, Output, Spec, Task},
+};
 
 /// A task specification which renders stored Markdown as HTML.
-pub struct Render;
+pub struct Render {
+    input: TaskId,
+}
 impl Render {
     #[inline]
-    pub fn spec() -> impl Spec {
+    pub fn new(input: TaskId) -> Self {
+        Self { input }
+    }
+
+    #[inline]
+    fn spec() -> impl Spec {
         |dependencies: &[Output]| {
             let [parsed] = dependencies else {
                 return Err(Error::DependencyCount {
@@ -23,14 +33,18 @@ impl Render {
         }
     }
 }
+
+impl From<Render> for Task {
+    fn from(render: Render) -> Self {
+        Task::new(Render::spec(), vec![render.input])
+    }
+}
 #[cfg(test)]
 mod tests {
-    use crate::task::parse::Parse;
-
     use super::*;
 
     fn parsed(source: &str) -> Output {
-        Parse::spec()(&[source.as_bytes().to_vec()]).unwrap()
+        source.as_bytes().to_vec()
     }
 
     #[test]
