@@ -205,12 +205,12 @@ impl<'a, K: Identity> Store<K> {
     #[inline]
     pub fn contains_bytes(&self, bytes: &[u8]) -> bool {
         let key = K::of(bytes);
-        self.contains_key(key)
+        self.contains_key(&key)
     }
 
     #[inline]
-    pub fn contains_key(&self, key: K) -> bool {
-        todo!("Helper function to check if the given key.")
+    pub fn contains_key(&self, key: &K) -> bool {
+        self.object_path(key).is_file()
     }
 
     #[inline]
