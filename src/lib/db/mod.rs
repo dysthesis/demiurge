@@ -1,4 +1,7 @@
-use std::{path::Path, result};
+use std::{
+    path::{Path, PathBuf},
+    result,
+};
 
 use rusqlite::Connection;
 
@@ -9,22 +12,22 @@ pub struct Db {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum Error<'a> {
+pub enum Error {
     #[error("Failed to open database at {path}")]
     ConnectionOpenError {
-        path: &'a Path,
+        path: PathBuf,
         #[source]
         error: rusqlite::Error,
     },
 }
 
-pub type Result<'a, T> = result::Result<T, Error<'a>>;
+pub type Result<T> = result::Result<T, Error>;
 
 impl Db {
-    pub fn new<P: AsRef<Path>>(db_file: P) -> Result<'_, Self> {
-        let conn = Connection::open(db_file).map_err(|error| {
+    pub fn new<P: AsRef<Path>>(db_file: P) -> Result<Self> {
+        let conn = Connection::open(db_file.as_ref()).map_err(|error| {
             Error::ConnectionOpenError {
-                path: db_file.into(),
+                path: db_file.as_ref().to_owned(),
                 error,
             }
         })?;
