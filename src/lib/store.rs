@@ -136,7 +136,7 @@ impl<K: Identity> Store<K> {
             return Err(Error::InvalidPathFormat { path });
         }
 
-        if !(Self::is_existing_store(&path)?) {
+        if !Self::is_existing_store(&path)? {
             Self::initialise_dir(&path)?;
         }
 
