@@ -34,9 +34,11 @@ impl Render {
     }
 }
 
+const RENDER_TASK_VERSION: usize = 1;
+
 impl From<Render> for Task {
     fn from(render: Render) -> Self {
-        Task::new(Render::spec(), vec![render.input])
+        Task::new(Render::spec(), vec![render.input], RENDER_TASK_VERSION)
     }
 }
 #[cfg(test)]

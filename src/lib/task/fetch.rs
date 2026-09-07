@@ -26,9 +26,11 @@ impl Fetch {
     }
 }
 
+const FETCH_TASK_VERSION: usize = 1;
+
 impl From<Fetch> for Task {
     fn from(fetch: Fetch) -> Self {
-        Task::new(fetch.spec(), vec![])
+        Task::new(fetch.spec(), vec![], FETCH_TASK_VERSION)
     }
 }
 

@@ -58,11 +58,12 @@ pub struct Task {
     deps: Vec<TaskId>,
     spec: Option<Box<dyn Spec>>,
     state: State,
+    version: usize,
 }
 
 impl Task {
     /// Construct a task from a custom specification and its dependencies.
-    pub fn new<S>(spec: S, dependencies: Vec<TaskId>) -> Self
+    pub fn new<S>(spec: S, dependencies: Vec<TaskId>, version: usize) -> Self
     where
         S: Spec + 'static,
     {
@@ -70,6 +71,7 @@ impl Task {
             deps: dependencies,
             spec: Some(Box::new(spec)),
             state: State::Pending,
+            version,
         }
     }
 
@@ -153,6 +155,7 @@ mod tests {
             .add_task(Task::new(
                 |_: &[Output]| Ok(b"constant".to_vec()),
                 vec![],
+                1,
             ))
             .unwrap();
 
@@ -169,6 +172,7 @@ mod tests {
             .add_task(Task::new(
                 |_: &[Output]| Ok(b"dependency".to_vec()),
                 vec![],
+                1,
             ))
             .unwrap();
         let task = ctx
@@ -180,6 +184,7 @@ mod tests {
                     Ok([dependency.as_slice(), b" output"].concat())
                 },
                 vec![dependency],
+                1,
             ))
             .unwrap();
 

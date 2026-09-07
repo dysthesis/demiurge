@@ -34,9 +34,11 @@ impl Parse {
     }
 }
 
+const PARSE_TASK_VERSION: usize = 1;
+
 impl From<Parse> for Task {
     fn from(parse: Parse) -> Self {
-        Task::new(Parse::spec(), vec![parse.input])
+        Task::new(Parse::spec(), vec![parse.input], PARSE_TASK_VERSION)
     }
 }
 
