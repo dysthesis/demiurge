@@ -6,6 +6,9 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+#[cfg(test)]
+mod tests;
+
 /// A stable identity for a sequence of bytes.
 pub trait Identity: Clone + PartialEq + Eq + Display {
     /// Derive the key of a chunk of bytes.
@@ -390,10 +393,3 @@ fn sync_directory(path: &Path) -> Result<()> {
 fn sync_directory(_path: &Path) -> Result<()> {
     todo!("I don't use W*ndows lmao.")
 }
-
-#[cfg(test)]
-mod initialisation;
-#[cfg(test)]
-mod integrity;
-#[cfg(test)]
-mod lifecycle;
