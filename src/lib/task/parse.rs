@@ -93,10 +93,29 @@ mod tests {
 
     proptest! {
         #[test]
-        fn arbitrary_input_does_not_panic(
-            contents in prop::collection::vec(any::<u8>(), 0..65536)
+        fn arbitrary_bytes_follow_utf8_contract(
+            contents in prop::collection::vec(any::<u8>(), 0..4096)
         ) {
-            let _ = run_parse(contents);
+            let expected = std::str::from_utf8(&contents).map(drop);
+            match (expected, run_parse(contents.clone())) {
+                (Ok(()), Ok(output)) => prop_assert_eq!(output, contents),
+                (Err(expected), Err(Error::InvalidUtf8(actual))) => {
+                    prop_assert_eq!(actual.valid_up_to(), expected.valid_up_to());
+                    prop_assert_eq!(actual.error_len(), expected.error_len());
+                }
+                (expected, actual) => prop_assert!(
+                    false,
+                    "UTF-8 result mismatch: expected {expected:?}, got {actual:?}"
+                ),
+            }
+        }
+
+        #[test]
+        fn valid_unicode_is_preserved(
+            source in prop::collection::vec(any::<char>(), 0..1024)
+                .prop_map(|chars| chars.into_iter().collect::<String>())
+        ) {
+            prop_assert_eq!(run_parse(source.as_bytes()).unwrap(), source.as_bytes());
         }
     }
 }
