@@ -197,3 +197,137 @@ fn publication_failure_consumes_task_but_not_fresh_task() {
     assert_eq!(fresh_key, expected_key);
     assert_eq!(ctx.get_object(&fresh_key).unwrap(), output);
 }
+
+#[test]
+fn dependency_read_failures_are_retryable_before_consumption() {
+    for corrupt in [false, true] {
+        let (_directory, root, mut ctx) = context();
+        let dependency_bytes = b"restorable dependency";
+        let dependency = ctx
+            .add_task(Task::new(
+                |_: &[Output]| Ok(dependency_bytes.to_vec()),
+                vec![],
+                1,
+            ))
+            .unwrap();
+        ctx.run_task(dependency).unwrap();
+        let dependency_key = ctx.task_result(dependency).unwrap().unwrap();
+        let dependency_path = object_path(&root, &dependency_key);
+
+        if corrupt {
+            fs::write(&dependency_path, b"corrupt").unwrap();
+        } else {
+            fs::remove_file(&dependency_path).unwrap();
+        }
+
+        let invocations = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&invocations);
+        let consumer = ctx
+            .add_task(Task::new(
+                move |dependencies: &[Output]| {
+                    observed.fetch_add(1, Ordering::SeqCst);
+                    Ok([b"consumer: ".as_slice(), dependencies[0].as_slice()]
+                        .concat())
+                },
+                vec![dependency],
+                1,
+            ))
+            .unwrap();
+
+        match ctx.run_task(consumer).unwrap_err() {
+            task::Error::Context(context::Error::StoreGetFailed {
+                error: store::Error::CorruptObject { path },
+            }) if corrupt => assert_eq!(path, dependency_path),
+            task::Error::Context(context::Error::StoreGetFailed {
+                error: store::Error::ObjectNotFound { path },
+            }) if !corrupt => assert_eq!(path, dependency_path),
+            error => panic!("unexpected dependency read error: {error:?}"),
+        }
+        assert_eq!(invocations.load(Ordering::SeqCst), 0);
+        assert_eq!(ctx.task_result(consumer).unwrap(), None);
+
+        fs::write(&dependency_path, dependency_bytes).unwrap();
+        ctx.run_task(consumer).unwrap();
+        let result = ctx.task_result(consumer).unwrap().unwrap();
+        assert_eq!(
+            ctx.get_object(&result).unwrap(),
+            b"consumer: restorable dependency"
+        );
+        assert_eq!(invocations.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[test]
+fn batch_handles_map_to_their_exact_tasks() {
+    let (_directory, _root, mut ctx) = context();
+    let original = ctx
+        .add_task(Task::new(
+            |_: &[Output]| Ok(b"original".to_vec()),
+            vec![],
+            1,
+        ))
+        .unwrap();
+    let handles = ctx
+        .add_tasks([
+            Task::new(|_: &[Output]| Ok(b"batch A".to_vec()), vec![], 1),
+            Task::new(|_: &[Output]| Ok(b"batch B".to_vec()), vec![], 1),
+            Task::new(|_: &[Output]| Ok(b"batch C".to_vec()), vec![], 1),
+        ])
+        .unwrap();
+
+    for index in [2, 0, 1] {
+        ctx.run_task(handles[index]).unwrap();
+    }
+    ctx.run_task(original).unwrap();
+
+    for (handle, expected) in
+        handles
+            .into_iter()
+            .zip([b"batch A".as_slice(), b"batch B", b"batch C"])
+    {
+        let key = ctx.task_result(handle).unwrap().unwrap();
+        assert_eq!(ctx.get_object(&key).unwrap(), expected);
+    }
+    let original_key = ctx.task_result(original).unwrap().unwrap();
+    assert_eq!(ctx.get_object(&original_key).unwrap(), b"original");
+}
+
+#[test]
+fn duplicate_dependencies_preserve_order_across_partial_readiness() {
+    let (_directory, _root, mut ctx) = context();
+    let [a, b, c] = [b"A", b"B", b"C"].map(|output| {
+        ctx.add_task(Task::new(
+            move |_: &[Output]| Ok(output.to_vec()),
+            vec![],
+            1,
+        ))
+        .unwrap()
+    });
+    let invocations = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&invocations);
+    let consumer = ctx
+        .add_task(Task::new(
+            move |dependencies: &[Output]| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Ok(dependencies.concat())
+            },
+            vec![b, a, b, c],
+            1,
+        ))
+        .unwrap();
+
+    ctx.run_task(a).unwrap();
+    ctx.run_task(b).unwrap();
+    assert!(matches!(
+        ctx.run_task(consumer),
+        Err(task::Error::DependencyOutputUnsatisfied)
+    ));
+    assert_eq!(ctx.task_result(consumer).unwrap(), None);
+    assert_eq!(invocations.load(Ordering::SeqCst), 0);
+
+    ctx.run_task(c).unwrap();
+    ctx.run_task(consumer).unwrap();
+    let result = ctx.task_result(consumer).unwrap().unwrap();
+    assert_eq!(ctx.get_object(&result).unwrap(), b"BABC");
+    assert_eq!(invocations.load(Ordering::SeqCst), 1);
+}
