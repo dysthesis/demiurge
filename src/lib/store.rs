@@ -392,4 +392,6 @@ fn sync_directory(_path: &Path) -> Result<()> {
 }
 
 #[cfg(test)]
+mod integrity;
+#[cfg(test)]
 mod lifecycle;
