@@ -152,11 +152,10 @@ fn publication_failure_consumes_task_but_not_fresh_task() {
     let (_directory, root, mut ctx) = context();
     let output = b"publication output";
     let expected_key = Key::of(output);
-    let expected_parent =
-        object_path(&root.canonicalize().unwrap(), &expected_key)
-            .parent()
-            .unwrap()
-            .to_owned();
+    let expected_parent = object_path(&root, &expected_key)
+        .parent()
+        .unwrap()
+        .to_owned();
     fs::write(root.join("objects"), b"obstruction").unwrap();
 
     let invocations = Arc::new(AtomicUsize::new(0));
