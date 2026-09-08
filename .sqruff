@@ -1,0 +1,6 @@
+[sqruff]
+dialect = sqlite
+templater = placeholder
+
+[sqruff:templater:placeholder]
+param_style = question_mark
