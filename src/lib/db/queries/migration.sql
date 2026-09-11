@@ -1,3 +1,14 @@
+CREATE TABLE state (
+    id INTEGER PRIMARY KEY
+    CHECK (id = 1),
+
+    rev INTEGER NOT NULL
+    CHECK (rev >= 0)
+) STRICT;
+
+INSERT INTO state (id, rev)
+VALUES (1, 0);
+
 CREATE TABLE node (
     id INTEGER PRIMARY KEY,
 
@@ -8,8 +19,8 @@ CREATE TABLE node (
     key TEXT NOT NULL,
 
     -- Hash of its output
-    hash BLOB NOT NULL
-    CHECK (length(hash) = 32),
+    output_hash BLOB NOT NULL
+    CHECK (length(output_hash) = 32),
 
     -- Each task of a given version should be unique in this table
     UNIQUE (kind, key)
@@ -23,7 +34,8 @@ CREATE TABLE dependency (
 
     -- What does this depend on?
     dep INTEGER NOT NULL
-    REFERENCES node(id),
+    REFERENCES node(id)
+	ON DELETE RESTRICT,
 
     -- What was the last observed hash of this dependency?
     -- If expected != dep.hash, then dep has changed.
