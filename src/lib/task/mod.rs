@@ -58,6 +58,7 @@ pub struct Task {
     deps: Vec<TaskId>,
     spec: Option<Box<dyn Spec>>,
     state: State,
+    #[allow(unused)]
     version: usize,
 }
 
