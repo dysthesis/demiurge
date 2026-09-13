@@ -155,7 +155,7 @@ impl Db {
 
         Ok(Self { conn })
     }
-    pub fn trace(&self, node: &NodeKey) -> Result<Option<Trace>> {
+    pub fn get(&self, node: &NodeKey) -> Result<Option<Trace>> {
         let stored = self
             .conn
             .query_row(
@@ -229,7 +229,7 @@ impl Db {
             dependencies,
         }))
     }
-    pub fn replace_trace(&mut self, trace: &Trace) -> Result<()> {
+    pub fn put(&mut self, trace: &Trace) -> Result<()> {
         let mut seen = HashSet::with_capacity(trace.dependencies.len());
 
         for dependency in &trace.dependencies {
@@ -467,7 +467,7 @@ mod tests {
     fn trace_returns_none_for_unknown_node() {
         let db = Db::new(":memory:").unwrap();
 
-        let result = db.trace(&node("unknown")).unwrap();
+        let result = db.get(&node("unknown")).unwrap();
 
         assert_eq!(result, None);
     }
@@ -478,9 +478,9 @@ mod tests {
 
         let trace = leaf("leaf", 1);
 
-        db.replace_trace(&trace).unwrap();
+        db.put(&trace).unwrap();
 
-        assert_eq!(db.trace(&trace.node).unwrap(), Some(trace),);
+        assert_eq!(db.get(&trace.node).unwrap(), Some(trace),);
     }
 
     #[test]
@@ -490,8 +490,8 @@ mod tests {
         let a = leaf("a", 1);
         let b = leaf("b", 2);
 
-        db.replace_trace(&a).unwrap();
-        db.replace_trace(&b).unwrap();
+        db.put(&a).unwrap();
+        db.put(&b).unwrap();
 
         let parent = Trace {
             node: node("parent"),
@@ -499,9 +499,9 @@ mod tests {
             dependencies: vec![dependency(&a), dependency(&b)],
         };
 
-        db.replace_trace(&parent).unwrap();
+        db.put(&parent).unwrap();
 
-        assert_eq!(db.trace(&parent.node).unwrap(), Some(parent),);
+        assert_eq!(db.get(&parent.node).unwrap(), Some(parent),);
     }
 
     proptest! {
